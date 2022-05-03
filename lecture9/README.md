@@ -156,3 +156,150 @@ pthread_cond_destroy(&cond);
 
 ```init```함수를 따로 쓰지않고 ```PTHREAD_COND_INITIALIZER```를 변수에 넣어줘서 써도 된다.
 
+condition variable은 3가지의 동작을 가지고 있다.
+
+```c
+int pthread_cond_wait(pthread_cond_t *, pthread_mutex_t *)
+int pthread_cond_broadcast(pthread_cond_t *)
+int pthread_cond_signal(pthread_cond_t *);
+```
+```pthread_cond_wait```을 통해 ```thread```를 block 상태로 만들 수 있다. 중요한 것은 두번쨰 입력 파라미터가 ```mutex```라는 것이다. ```mutex```를 넘겨주는 이유는 ```pthread_cond_wait```이 실행되면 ```mutex```를 ```unlock```하기 때문이다.
+
+그러나, block되었기 떄문에 누군가가 꺠워줘야 한다. 이것이 바로 ```pthread_cond_signal```이다. 단 ```condition variable```로 깨워줄 떄는 ```mutex```를 ```unlock```시키고 해야한다. 
+
+깨어난 ```thread```는 ```mutex```를 ```lock```을 하고 일어나기 때문이다. 만약 ```unlock```이 안되었다면 실행이 안될 것이다.
+
+```pthread_cond_broadcast```은 block된 모든 ```thread```들을 깨우는 것이다. 즉, ```condition variable```에 의해 ```wait```상태로 간 ```thread```들은 ```queue```에 들어가고 이 ```queue```에서 하나씩 ```pop```을 하는 것이 ```pthread_cond_signal```이고, 전부 실행하는 것이 ```pthread_cond_broadcast```이다.
+
+어떻게보면 ```condition variable```은 하나의 ```queue```인 것이다.
+
+```condition variable```을 이용하여 위의 문제를 해결해보자.
+
+- gat_station.c
+```c
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <errno.h>
+
+typedef struct{
+    int fuel;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+}GasStation_t;
+
+GasStation_t gGasStation ={
+    .fuel = 0,
+    .mutex = PTHREAD_MUTEX_INITIALIZER,
+    .cond = PTHREAD_COND_INITIALIZER,
+};
+
+void* fuel_filling(void* arg){
+    for(int i = 0; i < 5; i++){
+        pthread_mutex_lock(&gGasStation.mutex);
+        gGasStation.fuel += 15;
+        printf("Filled fuel ... %d\n", gGasStation.fuel);
+        pthread_mutex_unlock(&gGasStation.mutex);
+        pthread_cond_signal(&gGasStation.cond);
+        sleep(1);
+    }
+}
+
+void* car(void* arg){
+    pthread_mutex_lock(&gGasStation.mutex);
+    while(gGasStation.fuel < 40){
+        printf("No fuel. Waiting...\n");
+        pthread_cond_wait(&gGasStation.cond, &gGasStation.mutex);
+    }
+    gGasStation.fuel -= 40;
+    printf("Got fuel. Now left: %d\n",gGasStation.fuel);
+    pthread_mutex_unlock(&gGasStation.mutex);
+}
+
+int main(int argc, char* argv[]){
+    pthread_t th[2];
+    for(int i = 0; i < 2; i++){
+        if(i == 1){
+            if(pthread_create(&th[i], NULL, &fuel_filling, NULL) != 0){
+                perror("Failed to create thread");
+            }
+        }
+        else{
+            if(pthread_create(&th[i], NULL, &car, NULL) != 0){
+                perror("Failed to create thread");
+            }
+        }
+    }
+
+    for(int i = 0; i < 2; i++){
+        if(pthread_join(th[i], NULL) != 0){
+            perror("Failed to join thread");
+        }
+    }
+    pthread_mutex_destroy(&gGasStation.mutex);
+    pthread_cond_destroy(&gGasStation.cond);
+}
+```
+
+위의 코드를 실행하면 다음과 같다.
+```
+No fuel. Waiting...
+Filled fuel ... 15
+No fuel. Waiting...
+Filled fuel ... 30
+No fuel. Waiting...
+Filled fuel ... 45
+Got fuel. Now left: 5
+Filled fuel ... 20
+Filled fuel ... 35
+```
+fuel이 40보다 작다면 기다고 있다가 40보다 커지는 45가 되는 순간 ```car```의 연산이 수행된 것을 확인할 수 있다.
+
+하나하나, 추가한 부분을 살펴보자.
+```GasStation_t```에 ```pthread_cond_t cond;```가 추가되었다.
+
+```c
+void* car(void* arg){
+    pthread_mutex_lock(&gGasStation.mutex);
+    while(gGasStation.fuel < 40){
+        printf("No fuel. Waiting...\n");
+        pthread_cond_wait(&gGasStation.cond, &gGasStation.mutex);
+    }
+    gGasStation.fuel -= 40;
+    printf("Got fuel. Now left: %d\n",gGasStation.fuel);
+    pthread_mutex_unlock(&gGasStation.mutex);
+}
+```
+```car```에서는 ```while```을 통해서 연료량이 감소되는 연료량보다 적다면 ```pthread_cond_wait```하도록 하였다. 여기서 중요한 것은 반드시 ```while```안에 써야한다는 것이다. 만약 ```while```이 없었다면 제대로 동작하지 않았을 것이다.
+
+```c
+void* fuel_filling(void* arg){
+    for(int i = 0; i < 5; i++){
+        pthread_mutex_lock(&gGasStation.mutex);
+        gGasStation.fuel += 15;
+        printf("Filled fuel ... %d\n", gGasStation.fuel);
+        pthread_mutex_unlock(&gGasStation.mutex);
+        pthread_cond_signal(&gGasStation.cond);
+        sleep(1);
+    }
+}
+```
+```fuel_filling```에서는 ```pthread_cond_signal```로 block 상태에 있는 ```thread```를 깨운다. 
+
+이렇게 ```condition variable```을 통해 ```thread```간의 일정 조건이 만족하면 신호를 주어 로직을 실행할 수 있도록 communication하는 것이다. 이것으로 deadlock의 문제를 해결한 것이다.
+
+앞서 말했듯이 ```pthread_cond_wait```가 사용된 코드 주변을 잘보면 ```mutex```를 ``unlock```도, ```lock```도 하지 않는다. 이는 ```pthread_cond_wait``` 내부적으로 ```unlock```과 ```lock```을 수행하기 때문이다.
+
+```c/
+pthread_cond_wait(&cond, &mutex);
+/*
+1. pthread_mutex_unlock(&mutex);
+2. wait for signal on condition variable
+3. pthread_mutex_lock(&mutex);
+*/
+```
+이렇게 내부적으로 동작한다고 생각하면 된다.
+
+정리하자면, ```condition variable```은 ```queue```이자 어떤 ```조건```의 ```identifier```이다. 이 ```조건```이 만족하면 ```signal```을 보내고, 만족하지 않으면 ```wait```하는 것이다.
+

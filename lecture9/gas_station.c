@@ -22,6 +22,7 @@ void* fuel_filling(void* arg){
         gGasStation.fuel += 15;
         printf("Filled fuel ... %d\n", gGasStation.fuel);
         pthread_mutex_unlock(&gGasStation.mutex);
+        pthread_cond_signal(&gGasStation.cond);
         sleep(1);
     }
 }
@@ -30,7 +31,7 @@ void* car(void* arg){
     pthread_mutex_lock(&gGasStation.mutex);
     while(gGasStation.fuel < 40){
         printf("No fuel. Waiting...\n");
-        sleep(1);
+        pthread_cond_wait(&gGasStation.cond, &gGasStation.mutex);
     }
     gGasStation.fuel -= 40;
     printf("Got fuel. Now left: %d\n",gGasStation.fuel);
