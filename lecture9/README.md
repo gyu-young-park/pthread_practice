@@ -169,7 +169,7 @@ int pthread_cond_signal(pthread_cond_t *);
 
 깨어난 ```thread```는 ```mutex```를 ```lock```을 하고 일어나기 때문이다. 만약 ```unlock```이 안되었다면 실행이 안될 것이다.
 
-```pthread_cond_broadcast```은 block된 모든 ```thread```들을 깨우는 것이다. 즉, ```condition variable```에 의해 ```wait```상태로 간 ```thread```들은 ```queue```에 들어가고 이 ```queue```에서 하나씩 ```pop```을 하는 것이 ```pthread_cond_signal```이고, 전부 실행하는 것이 ```pthread_cond_broadcast```이다.
+```pthread_cond_broadcast```은 block된 모든 ```thread```들을 깨우는 것이다. 즉, ```condition variable```에 의해 ```wait```상태로 간 ```thread```들은 ```queue```에 들어가고 이 ```queue```에서 하나씩 ```pop```을 하는 것이 ```pthread_cond_signal```이고, 전부 실행하는 것이 ```pthread_cond_broadcast```이다. 
 
 어떻게보면 ```condition variable```은 하나의 ```queue```인 것이다.
 
@@ -303,3 +303,173 @@ pthread_cond_wait(&cond, &mutex);
 
 정리하자면, ```condition variable```은 ```queue```이자 어떤 ```조건```의 ```identifier```이다. 이 ```조건```이 만족하면 ```signal```을 보내고, 만족하지 않으면 ```wait```하는 것이다.
 
+# pthread_cond_broadcast
+좀 더 예제를 심화시켜서 현실 세계에 가깝게 해보자. 주유소에 하나의 차만 올리가 없다. 여러 차들이 와서 연료를 가져가려 한다면 어떻게될까??
+
+- real_gas_station.c
+```c
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <errno.h>
+
+int thread_number[5] = {0,1,2,3,4};
+
+typedef struct{
+    int fuel;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+}GasStation_t;
+
+GasStation_t gGasStation ={
+    .fuel = 0,
+    .mutex = PTHREAD_MUTEX_INITIALIZER,
+    .cond = PTHREAD_COND_INITIALIZER,
+};
+
+void* fuel_filling(void* arg){
+    for(int i = 0; i < 5; i++){
+        pthread_mutex_lock(&gGasStation.mutex);
+        gGasStation.fuel += 15;
+        printf("Filled fuel ... %d\n", gGasStation.fuel);
+        pthread_mutex_unlock(&gGasStation.mutex);
+        pthread_cond_signal(&gGasStation.cond);
+        sleep(1);
+    }
+}
+
+void* car(void* arg){
+    int id = *(int*)arg;
+    pthread_mutex_lock(&gGasStation.mutex);
+    while(gGasStation.fuel < 40){
+        printf("ID:%d, No fuel. Waiting...\n", id);
+        pthread_cond_wait(&gGasStation.cond, &gGasStation.mutex);
+    }
+    gGasStation.fuel -= 40;
+    printf("ID: %d, Got fuel. Now left: %d\n",id,gGasStation.fuel);
+    pthread_mutex_unlock(&gGasStation.mutex);
+}
+
+int main(int argc, char* argv[]){
+    pthread_t th[5];
+    for(int i = 0; i < 5; i++){
+        if(i == 4){
+            if(pthread_create(&th[i], NULL, &fuel_filling, NULL) != 0){
+                perror("Failed to create thread");
+            }
+        }
+        else{
+            if(pthread_create(&th[i], NULL, &car, (void*)(thread_number + i)) != 0){
+                perror("Failed to create thread");
+            }
+        }
+    }
+
+    for(int i = 0; i < 2; i++){
+        if(pthread_join(th[i], NULL) != 0){
+            perror("Failed to join thread");
+        }
+    }
+    pthread_mutex_destroy(&gGasStation.mutex);
+    pthread_cond_destroy(&gGasStation.cond);
+}
+```
+다음의 예제는 ``thread``` 수를 총 5가지까지 늘리고 마지막 ```thread```를 제외한 4개는 ```car```를 실행하고, 마지막 ```thread```만 ```fuel_filling```을 실행한다.
+
+과연 어떻게 실행되는 지 확인해보자.
+
+```c
+ID:0, No fuel. Waiting...
+Filled fuel ... 15
+ID:2, No fuel. Waiting...
+ID:3, No fuel. Waiting...
+ID:0, No fuel. Waiting...
+ID:1, No fuel. Waiting...
+Filled fuel ... 30
+ID:2, No fuel. Waiting...
+Filled fuel ... 45
+ID: 3, Got fuel. Now left: 5
+Filled fuel ... 20
+ID:0, No fuel. Waiting...
+Filled fuel ... 35
+ID:1, No fuel. Waiting...
+(무한 기다림...)
+```
+프로세스가 종료되지 않고 무한 대기하게 된다. 이는 ```thread0,1,2,3```은 ```car```을 실행하는데, 연료를 얻기만(-40) 기다린다. ```signal```을 보내주는 ```fuel_filling```을 실행하는 ```thread 4```는 ```signal```을 보내주긴 하지만, 채워지는 양이 충분하지 않아 일부 ```thread```들이 계속 ```block```된 상태에서 기다리게 된다.
+
+그래서 ```fuel_filling```에서 ```+15```가 아니라 ```+60```을 하도록하여 모두가 ```fuel```을 얻고 종료할 수 있도록 하자. 이는 ```condition variable```을 사용할 떄 조심해야하는 부분으로, 조건이 만족하지 않으면 block되는 ```thread```들이 너무 많이 생성되는 문제가 발생하지 않도록 조심해야 한다.
+
+```c
+void* fuel_filling(void* arg){
+    for(int i = 0; i < 5; i++){
+        pthread_mutex_lock(&gGasStation.mutex);
+        gGasStation.fuel += 60;
+        printf("Filled fuel ... %d\n", gGasStation.fuel);
+        pthread_mutex_unlock(&gGasStation.mutex);
+        pthread_cond_signal(&gGasStation.cond);
+        sleep(1);
+    }
+}
+```
+
+결과는 다음과 같다.
+```
+ID:0, No fuel. Waiting...
+ID:3, No fuel. Waiting...
+Filled fuel ... 60
+ID: 2, Got fuel. Now left: 20
+ID:1, No fuel. Waiting...
+ID:0, No fuel. Waiting...
+Filled fuel ... 80
+ID: 3, Got fuel. Now left: 40
+Filled fuel ... 100
+ID: 1, Got fuel. Now left: 60
+Filled fuel ... 120
+ID: 0, Got fuel. Now left: 80
+```
+잘 해결된 것을 확인할 수 있다. 그런데, 이상한 것을 확인할 수 있는데, 바로 ```fuel```이 80일 때이다.
+
+```
+Filled fuel ... 80
+ID: 3, Got fuel. Now left: 40
+Filled fuel ... 100
+```
+해당 부분을 잘보면 이상한 것이 있다. 바로 ```fuel```은 80이고, 아직 ```thread 0, 1,3```이 연료를 받지 못한 상황인데, 기껏 연료를 받은 것은 ```thread 3```번 뿐이다.```fuel```이 ```80```이기 때문에 최대 두개의 ```thread```의 연료를 채워줄 수 있는데, 한 개 밖에 안채운 것이다. 
+
+**왜냐하면 ```signal```은 오직 ```queue```에 있는 하나의 ```thread```만을 ```awaken```시키기 때문이다.**
+
+이럴 떄 바로 ```pthread_cond_broadcast```를 사용하는 것이다. 모든 ```thread```를 깨워서 ```fuel```을 얻도록 하는 것이다.
+
+```c
+void* fuel_filling(void* arg){
+    for(int i = 0; i < 5; i++){
+        pthread_mutex_lock(&gGasStation.mutex);
+        gGasStation.fuel += 60;
+        printf("Filled fuel ... %d\n", gGasStation.fuel);
+        pthread_mutex_unlock(&gGasStation.mutex);
+        pthread_cond_broadcast(&gGasStation.cond);
+        sleep(1);
+    }
+}
+```
+```pthread_cond_signal```을 ```pthread_cond_broadcast```으로 바꾼 것 밖에 없다.
+
+결과는 다음과 같다.
+```
+ID:0, No fuel. Waiting...
+ID:3, No fuel. Waiting...
+ID:1, No fuel. Waiting...
+Filled fuel ... 60
+ID: 2, Got fuel. Now left: 20
+ID:3, No fuel. Waiting...
+ID:0, No fuel. Waiting...
+ID:1, No fuel. Waiting...
+Filled fuel ... 80
+ID: 3, Got fuel. Now left: 40
+ID: 1, Got fuel. Now left: 0
+ID:0, No fuel. Waiting...
+Filled fuel ... 60
+ID: 0, Got fuel. Now left: 20
+```
+```80```이 남았을 때 ```thread``` 두개가 바로 ```fuel```을 얻는 것을 확인할 수 있다. 
