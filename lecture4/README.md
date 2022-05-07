@@ -71,7 +71,7 @@ thread[8508] start!
 pthread[22952184715008] start!
 thread[8507] start!
 ```
-```pthread_t``와 ```syscall```을 통해 얻은 ```linux thread```의 ```id```값이 다르다는 것을 확인할 수 있다. 이유는 아주 간단한데, 우리의 program은 api로 pthread를 사용한다. 이 ```pthread```안에서 ```thread```를 구분하고 제어하기위해 사용하는 것이 바로 ```pthread_t```이다. 이 ```pthread_t```의 ```id```값을 이용하여 ```thread```를 만들고 제어하는데, 실제 ```thread```가 만들어지고 작동하고 있는 곳은 ```os```쪽이다. 따라서, ```pthread```는 ```os```의 ```thread```생성, 제어를 도와주는 하나의 ```api```인데, ```pthread```에서 추상적으로 ```os thread```를 구분하기위해 사용하는 것인 ```pthread_t```이다. ```os thread```는 ```pthread```와는 다른 ```thread id```를 사용하고 있고, 이를 호출하기 위해 사용한 것이 ```syscall(SYS_gettid)```이다.
+```pthread_t```와 ```syscall```을 통해 얻은 ```linux thread```의 ```id```값이 다르다는 것을 확인할 수 있다. 이유는 아주 간단한데, 우리의 program은 api로 pthread를 사용한다. 이 ```pthread```안에서 ```thread```를 구분하고 제어하기위해 사용하는 것이 바로 ```pthread_t```이다. 이 ```pthread_t```의 ```id```값을 이용하여 ```thread```를 만들고 제어하는데, 실제 ```thread```가 만들어지고 작동하고 있는 곳은 ```os```쪽이다. 따라서, ```pthread```는 ```os```의 ```thread```생성, 제어를 도와주는 하나의 ```api```인데, ```pthread```에서 추상적으로 ```os thread```를 구분하기위해 사용하는 것인 ```pthread_t```이다. ```os thread```는 ```pthread```와는 다른 ```thread id```를 사용하고 있고, 이를 호출하기 위해 사용한 것이 ```syscall(SYS_gettid)```이다.
 
 ```
 program <--pthread_t--> pthread(lib) <--tid--> os
