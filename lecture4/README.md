@@ -1,4 +1,4 @@
-# pthread_create
+# pthread_t, pthread_create
 이전까지는 **pthread**로 thread를 만드는 방법을 그냥 넘어가고, 결과만 확인하였다. 이번 시간에는 그냥 넘어갔던 **pthread_create** 부분들을 다시 되짚고, 알아보도록 하자.
 
 **pthread**를 생성하는 방법은 매우 간단하다.
@@ -11,7 +11,75 @@
 
 만약 아무것도 설정하지 않은 경우, 즉 **detach** 모드도 아니고 **pthread_join**도 설정하지 않으면 자원을 반납하지 않으니 조심하도록 하자.
 
-## 1. pthread_create와 pthread_join 사용을 조심해야하는 경우
+## 1. pthread_t
+```pthread_t```은 ```opaque data type```으로 정보가 노출되어 있지않다. 한 가지 재밌는 것은 ```phtread_t```는  ```unsigned long```으로 하나의 값이다. 이 값은 ```thread```의 **id**를 의미한다. 그래서 출력해보면 다음의 값들을 갖는 것을 확인할 수 있다.
+
+- pthread_id.c
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <errno.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+void* routine(void* arg){
+    pthread_t id = pthread_self();
+    printf("thread[%lu] start!\n", id);
+}
+
+int main(int argc, char* argv[]){
+    pthread_t th[2];
+    for(int i = 0; i < 2; i++){
+        if(pthread_create(&th[i], NULL, routine, NULL) != 0){
+            perror("Failed to create thread");
+        }
+        printf("pthread_t value:[%lu]\n",th[i]);
+    }
+
+    for(int i = 0; i < 2; i++){
+        if(pthread_join(th[i], NULL) != 0){
+            perror("Failed to join thread");
+        }
+    }
+}
+```
+다음의 코드를 보면, ```pthread_t```를 직접 ```printf```해서 실행하는 코드가 있고, ```routine```에서는 현재 실행 중인 ```thread```의 ```id```를 받아오는 ```pthread_self()```를 사용하여 ```id```를 출력하도록하였다. 두 결과를 살펴보면 다음과 같다.
+
+```
+pthread_t value:[6136459264]
+thread[6136459264] start!
+pthread_t value:[6137032704]
+thread[6137032704] start!
+```
+```main```에서 ```pthread_t```를 출력한 값과 ```routine```에서 ```pthread_self```로 얻어온 ```id```값이 동일한 것을 확인할 수 있다. 이를 통해, ```thread```들은 ```id```로 관리된다는 것을 확인할 수 있다.
+
+한 가지 재밌는 것은 ```linux system thread api```로 ```thread id```를 가져온 값과 ```pthread_t```의 값이 다르다는 것이다. ```main```함수에서 ```printf("pthread_t value:[%lu]\n",th[i]);```를 지우고, ```thread```함수인 ```routine```에 다음의 코드를 넣어보도록 하자. (*주의 mac에서는 아래의 코드가 구동되지 않을 수 있다. 이는 mac의 아키텍처에 따라 다르다.*)
+
+```c
+void* routine(void* arg){
+    pthread_t id = pthread_self();
+    printf("pthread[%lu] start!\n", id);
+    printf("thread[%d] start!\n", (pid_t)syscall(SYS_gettid));
+}
+```
+```(pid_t)syscall(SYS_gettid)```을 통해서 우리는 현재 실행 중인 ```thread```가 ```linux os```상에서 어떤 ```id```값으로 제어되고 있는 지 확인할 수 있다. 결과를 확인하면
+
+```
+pthread[22952182613760] start!
+thread[8508] start!
+pthread[22952184715008] start!
+thread[8507] start!
+```
+```pthread_t``와 ```syscall```을 통해 얻은 ```linux thread```의 ```id```값이 다르다는 것을 확인할 수 있다. 이유는 아주 간단한데, 우리의 program은 api로 pthread를 사용한다. 이 ```pthread```안에서 ```thread```를 구분하고 제어하기위해 사용하는 것이 바로 ```pthread_t```이다. 이 ```pthread_t```의 ```id```값을 이용하여 ```thread```를 만들고 제어하는데, 실제 ```thread```가 만들어지고 작동하고 있는 곳은 ```os```쪽이다. 따라서, ```pthread```는 ```os```의 ```thread```생성, 제어를 도와주는 하나의 ```api```인데, ```pthread```에서 추상적으로 ```os thread```를 구분하기위해 사용하는 것인 ```pthread_t```이다. ```os thread```는 ```pthread```와는 다른 ```thread id```를 사용하고 있고, 이를 호출하기 위해 사용한 것이 ```syscall(SYS_gettid)```이다.
+
+```
+program <--pthread_t--> pthread(lib) <--tid--> os
+```
+
+즉, ```program```단에서 ``os linux```를 쉽게 사용하기위해 ```pthread```가 사용되고, ```pthread```는 하나의 추상화 계층으로 실제 ```thread id```를 사용하는 것이 아닌, 자신들만의 ```pthread_t```를 구별자로 쓰며 이를 ```os thread id```와 맵핑한 것이다. 그래서 ```pthread```와 ```os thread```의 ```id```가 달랐던 것이다.
+
+## 2. pthread_create와 pthread_join 사용을 조심해야하는 경우
 이전 강의에서 사용했던 코드를 최적화시켜보자.
 
 ```c
