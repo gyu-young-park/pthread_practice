@@ -77,7 +77,7 @@ thread[8507] start!
 program <--pthread_t--> pthread(lib) <--tid--> os
 ```
 
-즉, ```program```단에서 ``os linux```를 쉽게 사용하기위해 ```pthread```가 사용되고, ```pthread```는 하나의 추상화 계층으로 실제 ```thread id```를 사용하는 것이 아닌, 자신들만의 ```pthread_t```를 구별자로 쓰며 이를 ```os thread id```와 맵핑한 것이다. 그래서 ```pthread```와 ```os thread```의 ```id```가 달랐던 것이다.
+즉, ```program```단에서 ```os linux```를 쉽게 사용하기위해 ```pthread```가 사용되고, ```pthread```는 하나의 추상화 계층으로 실제 ```thread id```를 사용하는 것이 아닌, 자신들만의 ```pthread_t```를 구별자로 쓰며 이를 ```os thread id```와 맵핑한 것이다. 그래서 ```pthread```와 ```os thread```의 ```id```가 달랐던 것이다.
 
 ## 2. pthread_create와 pthread_join 사용을 조심해야하는 경우
 이전 강의에서 사용했던 코드를 최적화시켜보자.
