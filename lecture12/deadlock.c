@@ -33,13 +33,13 @@ void* car1(void* arg){
 }
 
 void* car2(void* arg){
-    pthread_mutex_lock(&gasStation.fuel.mutex);
     pthread_mutex_lock(&gasStation.water.mutex);
     sleep(1);
+    pthread_mutex_lock(&gasStation.fuel.mutex);
     gasStation.water.amount -= 2;
     gasStation.fuel.amount -= 10;
-    pthread_mutex_unlock(&gasStation.water.mutex);
     pthread_mutex_unlock(&gasStation.fuel.mutex);
+    pthread_mutex_unlock(&gasStation.water.mutex);
 }
 
 int main(int argc, char* argv[]){
